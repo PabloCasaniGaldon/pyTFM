@@ -315,9 +315,9 @@ def TFM_tractions(u, v, pixelsize1, pixelsize2, h, young, sigma=0.49, spatial_fi
 def calculate_deformation(im1, im2, window_size=64, overlap=32, std_factor=20):
     """
     Calculation of deformation field using particle image velocimetry (PIV). Recommendations: window_size
-    should be about 6 time the size of bead. overlap should be no less than half of the window_size.
-    Std_factor should be kept as high as possible. Make sure to check for to many exclusions caused by this factor
-    e.g. by looking at the mask_std. Side note: returns -v because original v is negative if compared to coordinates
+    should be about 6 times the size of bead. overlap should be no less than half of the window_size.
+    Std_factor should be kept as high as possible. Make sure to check for too many exclusions caused by this factor
+    e.g. by looking at mask_std. Side note: returns -v because original v is negative if compared to coordinates
     of images (y-axis is inverted).
 
     :param im1: after image
@@ -325,11 +325,10 @@ def calculate_deformation(im1, im2, window_size=64, overlap=32, std_factor=20):
     :param window_size: integer, size of interrogation windows for PIV
     :param overlap: integer, overlap of interrogation windows for PIV
     :param std_factor: Filtering extreme outliers beyond
-                       mean(deformation) + std_factor * standard deviation (deformation)
-    :return:u,v deformation in x and y direction in pixel of the before and after image
-            x,y positions of the deformation field in coordinates of the after and before image
-            mask, mask_std  mask of filtered values by signal-to-noise filtering (piv internal) and filtering for
-            extreme outliers
+                    mean(deformation) + std_factor * standard deviation (deformation)
+    :return: u, v deformation in x and y directions in pixels of the original images;
+            mask, mask_std: boolean masks of vectors rejected by signal-to-noise filtering
+            and statistical outlier filtering, respectively.
     """
     # accepting either path to file or image data directly
     if isinstance(im1, str):
@@ -351,20 +350,48 @@ def calculate_deformation(im1, im2, window_size=64, overlap=32, std_factor=20):
                                                search_area_size=window_size,
                                                sig2noise_method='peak2peak')
 
-    u, v, mask = openpiv.validation.sig2noise_val(u, v, sig2noise, threshold=1.05)
+    # Identify vectors with low signal-to-noise.
+    mask = openpiv.validation.sig2noise_val(sig2noise, threshold=1.05)
 
-    def_abs = np.sqrt(u ** 2 + v ** 2)
+    # Convert masked arrays to regular floating-point arrays.
+    u = np.array(np.ma.filled(np.ma.asarray(u, dtype=float), np.nan), copy=True)
+    v = np.array(np.ma.filled(np.ma.asarray(v, dtype=float), np.nan), copy=True)
+
+    # Mark rejected vectors as invalid.
+    u[mask] = np.nan
+    v[mask] = np.nan
+
+    # Identify statistical outliers.
+    def_abs = np.sqrt(u**2 + v**2)
+
     m = np.nanmean(def_abs)
     std = np.nanstd(def_abs)
 
     threshold = std * std_factor + m
+
     mask_std = def_abs > threshold
+
     u[mask_std] = np.nan
     v[mask_std] = np.nan
 
-    u, v = openpiv.filters.replace_outliers(u, v, method='localmean', max_iter=10, kernel_size=2)
-    return u, -v, mask, mask_std  # return -v because of image inverted axis
+    # Combine both rejection criteria and any existing invalid values.
+    invalid_mask = mask | mask_std | ~np.isfinite(u) | ~np.isfinite(v)
 
+    # Replace invalid vectors using neighboring valid vectors.
+    u, v = openpiv.filters.replace_outliers(
+        u,
+        v,
+        flags=invalid_mask,
+        method="localmean",
+        max_iter=10,
+        kernel_size=2
+    )
+
+    # Convert the results to regular NumPy arrays.
+    u = np.asarray(np.ma.filled(np.ma.asarray(u), np.nan))
+    v = np.asarray(np.ma.filled(np.ma.asarray(v), np.nan))
+
+    return u, -v, mask, mask_std
 
 def get_xy_for_quiver(u):
     """

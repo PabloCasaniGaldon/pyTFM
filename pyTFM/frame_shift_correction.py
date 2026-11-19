@@ -29,7 +29,7 @@ def croping_after_shift(image, shift_x, shift_y):
         image = image[int(np.ceil(-shift_y)):, :]
     else:
         image = image[:-int(np.ceil(shift_y)), :]
-    return np.array(image, dtype=np.float)
+    return np.array(image, dtype=float)
 
 
 def check_subdirs(after_identifier, before_identifier, dirs):
